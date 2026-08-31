@@ -1,14 +1,16 @@
-"""
-SentinelAI: Autonomous Surveillance & CCTV Video Forensic Dashboard
-Main Application Entrypoint with Clean Rectangular Video Alignment and Minimalist Dark Design.
-"""
+import sys
+from pathlib import Path
+
+# Add project root directory to sys.path so 'src' can be imported when running via Streamlit Cloud
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
 import cv2
 import numpy as np
 import tempfile
 import time
-from pathlib import Path
 
 from src.core.config import default_config
 from src.core.logger import logger
@@ -23,8 +25,6 @@ from src.embeddings.vector_store import VideoVectorStore
 from src.agent.tools import SurveillanceTools
 from src.agent.graph import ForensicAgent
 from src.llm.local_llm import LocalLLMClient
-
-# UI Styles & Components
 from src.ui.styles import CUSTOM_CSS
 from src.ui.components import (
     render_header,
@@ -38,8 +38,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Apply global styling tokens
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
