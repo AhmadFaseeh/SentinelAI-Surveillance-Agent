@@ -66,3 +66,5 @@ class IncidentReport(BaseModel):
     evidence_items: List[ForensicEvidence] = Field(default_factory=list)
     timeline_timestamps: List[str] = Field(default_factory=list)
     verdict: str 
+Keyframe = KeyframeMetadata
+Segment = VideoSegment

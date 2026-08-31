@@ -13,6 +13,7 @@ import tempfile
 import time
 
 from src.core.config import default_config
+from src.core.types import KeyframeMetadata, VideoSegment
 from src.core.logger import logger
 from src.ingestion.video_reader import VideoReader
 from src.ingestion.scene_segmenter import SceneSegmenter
@@ -58,8 +59,6 @@ def main():
     render_header()
 
     embedder, detector, tracker, action_detector, vector_store, llm_client = load_core_models()
-
-    from src.core.types import Keyframe, Segment
 
     # 2. Input Source Selector (Clean Border Container)
     with st.container(border=True):
@@ -120,24 +119,24 @@ def main():
                             snapshots_dir.mkdir(parents=True, exist_ok=True)
                             snap_img_path = str(snapshots_dir / "keyframe_0.0s.jpg")
                             cv2.imwrite(snap_img_path, frame)
-
                             boxes = detector.detect_in_frame(frame)
                             detected_classes = list(set([b.class_name for b in boxes]))
-
-                            kf = Keyframe(
+                            kf = KeyframeMetadata(
                                 frame_index=0,
                                 timestamp_sec=0.0,
-                                snapshot_path=snap_img_path,
-                                detected_objects=detected_classes
+                                timestamp_formatted="00:00",
+                                motion_score=1.0,
+                                detected_objects=detected_classes,
+                                frame_path=snap_img_path
                             )
-                            seg = Segment(
-                                segment_id=0,
+                            seg = VideoSegment(
+                                segment_id=1,
                                 start_sec=0.0,
                                 end_sec=1.0,
-                                keyframe_timestamps=[0.0],
-                                activity_level="Active" if action_info.get("is_person_present") else "Low"
+                                keyframe_indices=[0],
+                                activity_level="high" if action_info.get("is_person_present") else "low",
+                                summary="Browser camera live snapshot capture"
                             )
-
                             images_for_embed = [VideoReader.bgr_to_pil(frame)]
                             embeddings = embedder.embed_image_batch(images_for_embed)
                             vector_store.clear()
@@ -146,7 +145,6 @@ def main():
                                 embeddings=embeddings,
                                 video_id=Path(out_path).stem
                             )
-
                             st.session_state["video_path"] = out_path
                             st.session_state["video_name"] = Path(out_path).name
                             st.session_state["keyframes"] = [kf]
@@ -155,8 +153,6 @@ def main():
                             st.session_state["last_cam_sig"] = file_sig
 
                             st.success(f"Snapshot Indexed Successfully! (Person: {action_info.get('posture')} | Objects: {items_found}). Ready for AI Detective Search below.")
-
-    # ----------------- Mode 2: Local Hardware Webcam Recorder -----------------
     elif "Local Hardware" in source_mode:
         with st.container(border=True):
             st.markdown("### Local Hardware Webcam Recorder")
