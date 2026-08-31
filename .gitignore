@@ -1,0 +1,35 @@
+# Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Model Weights & Checkpoints (Downloaded automatically at runtime)
+*.pt
+*.onnx
+*.bin
+
+# Video Data & Snapshots
+data/live_recordings/
+data/snapshots/
+data/chroma_db/
+data/raw_videos/*.mp4
+data/raw_videos/*.avi
+data/raw_videos/*.mov
+!data/raw_videos/.gitkeep
+
+# OS / IDE Artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.agents/
+.gemini/
+*.log
+SentinelAI
