@@ -59,23 +59,111 @@ def main():
 
     embedder, detector, tracker, action_detector, vector_store, llm_client = load_core_models()
 
+    from src.core.types import Keyframe, Segment
+
     # 2. Input Source Selector (Clean Border Container)
     with st.container(border=True):
         st.markdown("### Step 1: Select Surveillance Input Source")
         source_mode = st.radio(
             "Input Mode:",
-            ["Live Camera / Webcam (Real-time Action Recognition)", "Upload Video File (CCTV / Surveillance MP4)"],
+            [
+                "Browser Webcam / Camera Snapshot (Cloud & Local)",
+                "Local Hardware Webcam Recorder (Local PC only)",
+                "Upload Video File (CCTV / Surveillance MP4)"
+            ],
             index=0,
             horizontal=True
         )
 
-    # ----------------- Mode 1: Live Camera Feed -----------------
-    if "Live Camera" in source_mode:
+    # ----------------- Mode 1: Browser Webcam Snapshot (Cloud & Local) -----------------
+    if "Browser Webcam" in source_mode:
         with st.container(border=True):
-            st.markdown("### Live Camera & Posture Recorder")
+            st.markdown("### Browser Webcam & Live Action Analysis")
+            st.caption("Capture a live frame directly through your browser (compatible with Streamlit Cloud, Mobile, and Desktop).")
+
+            cam_file = st.camera_input("Capture Surveillance Frame from Browser Webcam")
+            if cam_file is not None:
+                bytes_data = cam_file.getvalue()
+                frame = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+
+                if frame is not None:
+                    annotated, action_info = action_detector.analyze_live_frame(frame)
+
+                    # Real-time HUD Telemetry Columns
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("POSTURE", action_info.get("posture", "Unknown"))
+                    m2.metric("MOVEMENT", action_info.get("movement", "Stationary"))
+                    m3.metric("PERSON IN VIEW", "YES" if action_info.get("is_person_present") else "NO")
+                    items_found = ", ".join(action_info.get("interacting_with", [])) or "None"
+                    m4.metric("OBJECTS DETECTED", items_found)
+
+                    rgb_annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+                    st.image(rgb_annotated, caption=f"Live HUD Analysis: {action_info['status_text']}", use_container_width=True)
+
+                    # Create standard recording file & keyframe index
+                    out_dir = Path("./data/live_recordings")
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    out_path = str(out_dir / f"browser_snap_{int(time.time())}.mp4")
+
+                    # Check if already indexed for this current frame
+                    file_sig = f"cam_{len(bytes_data)}_{cam_file.size}"
+                    if st.session_state.get("last_cam_sig") != file_sig:
+                        with st.spinner("Processing & Indexing Snapshot for Forensic Agent..."):
+                            snap_h, snap_w = frame.shape[:2]
+                            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                            writer = cv2.VideoWriter(out_path, fourcc, 15.0, (snap_w, snap_h))
+                            for _ in range(15):
+                                writer.write(frame)
+                            writer.release()
+
+                            snapshots_dir = Path("./data/snapshots") / Path(out_path).stem
+                            snapshots_dir.mkdir(parents=True, exist_ok=True)
+                            snap_img_path = str(snapshots_dir / "keyframe_0.0s.jpg")
+                            cv2.imwrite(snap_img_path, frame)
+
+                            boxes = detector.detect_in_frame(frame)
+                            detected_classes = list(set([b.class_name for b in boxes]))
+
+                            kf = Keyframe(
+                                frame_index=0,
+                                timestamp_sec=0.0,
+                                snapshot_path=snap_img_path,
+                                detected_objects=detected_classes
+                            )
+                            seg = Segment(
+                                segment_id=0,
+                                start_sec=0.0,
+                                end_sec=1.0,
+                                keyframe_timestamps=[0.0],
+                                activity_level="Active" if action_info.get("is_person_present") else "Low"
+                            )
+
+                            images_for_embed = [VideoReader.bgr_to_pil(frame)]
+                            embeddings = embedder.embed_image_batch(images_for_embed)
+                            vector_store.clear()
+                            vector_store.add_keyframes(
+                                keyframes=[kf],
+                                embeddings=embeddings,
+                                video_id=Path(out_path).stem
+                            )
+
+                            st.session_state["video_path"] = out_path
+                            st.session_state["video_name"] = Path(out_path).name
+                            st.session_state["keyframes"] = [kf]
+                            st.session_state["segments"] = [seg]
+                            st.session_state["indexed"] = True
+                            st.session_state["last_cam_sig"] = file_sig
+
+                            st.success(f"Snapshot Indexed Successfully! (Person: {action_info.get('posture')} | Objects: {items_found}). Ready for AI Detective Search below.")
+
+    # ----------------- Mode 2: Local Hardware Webcam Recorder -----------------
+    elif "Local Hardware" in source_mode:
+        with st.container(border=True):
+            st.markdown("### Local Hardware Webcam Recorder")
+            st.caption("Direct OpenCV camera recording for local testing (requires physical webcam attached to system).")
             col_c1, col_c2, col_c3 = st.columns([1, 1, 1.5])
             with col_c1:
-                cam_idx = st.number_input("Camera Device Index", min_value=0, max_value=5, value=0, help="0 is default webcam")
+                cam_idx = st.number_input("Camera Device Index", min_value=0, max_value=5, value=0, help="0 is default local webcam")
             with col_c2:
                 rec_duration = st.slider("Record Duration (seconds)", min_value=5, max_value=30, value=10, step=5)
             with col_c3:
@@ -84,11 +172,15 @@ def main():
                 record_btn = st.button("Start Live Recording & Auto-Analyze", type="primary", use_container_width=True)
 
             if record_btn:
-                with st.status("Recording from Live Webcam...", expanded=True) as status:
-                    st.write("Connecting to camera device...")
+                with st.status("Recording from Local Webcam...", expanded=True) as status:
+                    st.write("Connecting to hardware camera device...")
                     cam = LiveCameraRecorder(camera_index=cam_idx, fps=15)
                     if not cam.start_camera():
-                        st.error("Could not access camera! Please check your webcam connection.")
+                        status.update(label="Hardware Camera Unavailable", state="error")
+                        st.error(
+                            "Could not open physical webcam! If you are running on Streamlit Cloud or a remote server, "
+                            "the cloud environment has no physical camera attached. Please use 'Browser Webcam' or 'Upload Video File' mode."
+                        )
                     else:
                         out_path = f"./data/live_recordings/clip_{int(time.time())}.mp4"
                         cam.start_recording(out_path)
@@ -154,7 +246,7 @@ def main():
                             status.update(label="Recorded & Indexed Successfully!", state="complete")
                             st.success(f"Captured {cam.frames_count} frames ({rec_duration}s) and indexed {len(keyframes)} active keyframes!")
 
-    # ----------------- Mode 2: Upload Video File -----------------
+    # ----------------- Mode 3: Upload Video File -----------------
     else:
         with st.container(border=True):
             st.markdown("### Upload Surveillance Footage")
